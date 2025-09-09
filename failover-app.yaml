@@ -1,0 +1,122 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: failover-monitor
+  labels:
+    app.kubernetes.io/name: failover-monitor
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: failover-monitor-env
+  namespace: failover-monitor
+  labels: { app: failover-monitor }
+data:
+  SITE_A_HEALTH_URL: "https://my-app-my-app.apps.site-a.example.com/healthz"
+  SITE_B_HEALTH_URL: "https://my-app-my-app.apps.site-a.example.com/healthz"
+  PROBE_METHOD: "GET"
+  PROBE_TIMEOUT_SEC: "3"
+  VERIFY_TLS: "false"                 # upstream checks use HTTP; keep false
+  ACCEPT_STATUS_REGEX: "^2\\d\\d$"
+  CACHE_TTL_SEC: "5"
+  EXTRA_HEADER_KEY: ""                # set to e.g. Authorization if needed
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: failover-monitor-secret
+  namespace: failover-monitor
+  labels: { app: failover-monitor }
+type: Opaque
+stringData:
+  EXTRA_HEADER_VAL: ""                # e.g. "Bearer <token>" if needed
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: failover-monitor
+  namespace: failover-monitor
+  labels:
+    app: failover-monitor
+    app.kubernetes.io/name: failover-monitor
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: failover-monitor }
+  template:
+    metadata:
+      labels: { app: failover-monitor }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+      - name: monitor
+        image: failover-monitor:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8000
+        env:
+        - name: PORT
+          value: "8000"
+        - name: SITE_A_HEALTH_URL
+          valueFrom: { configMapKeyRef: { name: failover-monitor-env, key: SITE_A_HEALTH_URL } }
+        - name: SITE_B_HEALTH_URL
+          valueFrom: { configMapKeyRef: { name: failover-monitor-env, key: SITE_B_HEALTH_URL } }
+        - name: PROBE_METHOD
+          valueFrom: { configMapKeyRef: { name: failover-monitor-env, key: PROBE_METHOD } }
+        - name: PROBE_TIMEOUT_SEC
+          valueFrom: { configMapKeyRef: { name: failover-monitor-env, key: PROBE_TIMEOUT_SEC } }
+        - name: VERIFY_TLS
+          valueFrom: { configMapKeyRef: { name: failover-monitor-env, key: VERIFY_TLS } }
+        - name: ACCEPT_STATUS_REGEX
+          valueFrom: { configMapKeyRef: { name: failover-monitor-env, key: ACCEPT_STATUS_REGEX } }
+        - name: CACHE_TTL_SEC
+          valueFrom: { configMapKeyRef: { name: failover-monitor-env, key: CACHE_TTL_SEC } }
+        - name: EXTRA_HEADER_KEY
+          valueFrom: { configMapKeyRef: { name: failover-monitor-env, key: EXTRA_HEADER_KEY } }
+        - name: EXTRA_HEADER_VAL
+          valueFrom: { secretKeyRef: { name: failover-monitor-secret, key: EXTRA_HEADER_VAL, optional: true } }
+        readinessProbe:
+          httpGet: { path: /healthz, port: http }
+          initialDelaySeconds: 3
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet: { path: /healthz, port: http }
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests: { cpu: "50m", memory: "64Mi" }
+          limits:   { cpu: "200m", memory: "256Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: failover-monitor
+  namespace: failover-monitor
+  labels: { app: failover-monitor }
+spec:
+  selector: { app: failover-monitor }
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: failover-monitor
+  namespace: failover-monitor
+  labels: { app: failover-monitor }
+spec:
+  # host: ""   # leave empty to auto-generate
+  to:
+    kind: Service
+    name: failover-monitor
+  port:
+    targetPort: http
+  # No TLS (HTTP only)

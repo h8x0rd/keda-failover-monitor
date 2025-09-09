@@ -1,0 +1,22 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: my-app-failover
+  namespace: my-app
+spec:
+  scaleTargetRef:
+    kind: Deployment
+    name: my-app
+  minReplicaCount: 2
+  maxReplicaCount: 4
+  pollingInterval: 15         # seconds
+  cooldownPeriod: 120         # seconds
+  triggers:
+  - type: metrics-api
+    metadata:
+      method: "GET"
+      url: "http://<monitor-host>:8000/metric/site-a"
+      valueLocation: "value"
+      # Required:
+      targetValue: "0.25"
+      activationTargetValue: "1"

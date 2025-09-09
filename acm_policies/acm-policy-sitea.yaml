@@ -1,0 +1,81 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: myapp-scale-site-a
+  namespace: policies
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+  - objectDefinition:
+      apiVersion: policy.open-cluster-management.io/v1
+      kind: ConfigurationPolicy
+      metadata:
+        name: myapp-scale-site-a
+      spec:
+        remediationAction: enforce
+        # Optional: react faster/slower than the default
+        evaluationInterval:
+          compliant: 60s
+          noncompliant: 20s
+        object-templates-raw: |
+          {{- $peer := (lookup "cluster.open-cluster-management.io/v1" "ManagedCluster" "" "site-b") -}}
+          {{- $peerAvail := "" -}}
+          {{- if $peer -}}
+            {{- range $cond := $peer.status.conditions }}
+              {{- if eq $cond.type "ManagedClusterConditionAvailable" -}}
+                {{- $peerAvail = $cond.status -}}
+              {{- end -}}
+            {{- end -}}
+          {{- end -}}
+          {{- if or (eq $peerAvail "False") (eq $peerAvail "Unknown") (eq $peerAvail "") }}
+          # Peer is down/unknown -> scale up to 4
+          - complianceType: musthave
+            objectDefinition:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: my-app
+                namespace: my-app
+              spec:
+                replicas: 4
+          {{- else }}
+          # Peer is healthy -> stay at 2
+          - complianceType: musthave
+            objectDefinition:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: my-app
+                namespace: my-app
+              spec:
+                replicas: 2
+          {{- end }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: myapp-scale-site-a-placement
+  namespace: policies
+spec:
+  predicates:
+  - requiredClusterSelector:
+      labelSelector:
+        matchExpressions:
+        - key: site
+          operator: In
+          values: ["a"]
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: bind-myapp-scale-site-a
+  namespace: policies
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: myapp-scale-site-a-placement
+subjects:
+- apiGroup: policy.open-cluster-management.io
+  kind: Policy
+  name: myapp-scale-site-a

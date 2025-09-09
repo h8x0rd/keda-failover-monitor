@@ -1,0 +1,22 @@
+
+[Unit]
+Description=Failover Monitor (Flask) - venv
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/failover-monitor.env
+WorkingDirectory=/opt/failover-monitor
+ExecStart=/opt/failover-monitor/.venv/bin/gunicorn -w 2 -b 0.0.0.0:8000 app:app
+Restart=always
+RestartSec=5
+
+# Hardening (adjust if needed)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

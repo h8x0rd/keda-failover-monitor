@@ -1,0 +1,82 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: my-app
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-app-content
+  namespace: my-app
+data:
+  index.html: |
+    <html><body><h1>Hello from my-app</h1></body></html>
+  healthz: |
+    ok
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: my-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: nginx
+        image: quay.io/nginx/nginx-unprivileged
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: web-content
+          mountPath: /usr/share/nginx/html
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: web-content
+        configMap:
+          name: my-app-content
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app
+  namespace: my-app
+spec:
+  selector:
+    app: my-app
+  ports:
+  - name: web
+    port: 80
+    targetPort: 8080
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: my-app
+  namespace: my-app
+spec:
+  to:
+    kind: Service
+    name: my-app
+  port:
+    targetPort: web
+
